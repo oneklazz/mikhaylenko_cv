@@ -1,32 +1,63 @@
 import os
 import zipfile
-import numpy as np
 import matplotlib.pyplot as plt
+import numpy as np
+from pathlib import Path
+from scipy import ndimage
 
 zip_name = "motion.zip"
-out_dir = "motion_unzipped/out"
+extract_dir = "motion_unzipped"
 
-if not os.path.exists(out_dir):
+if not os.path.exists(extract_dir):
     with zipfile.ZipFile(zip_name, "r") as z:
-        z.extractall("motion_unzipped")
+        z.extractall(extract_dir)
 
-files = sorted(os.listdir(out_dir))
-xs = []
-ys = []
+def gnum(name):
+	return int(name.stem.split("_")[1])
+
+folder = Path(extract_dir) / "out"
+files = sorted(list(folder.glob("*.npy")), key=gnum)
+coords_all = []
+
 for f in files:
-    frame = np.load(os.path.join(out_dir, f))
+	img = np.load(f)
+	lab, cnt = ndimage.label(img)
+	centers = []
 
-    y, x = np.where(frame > 0)
+	for i in range(1, cnt + 1):
+		m = lab == i
+		y, x = ndimage.center_of_mass(m)
+		centers.append((x, y))
 
-    if len(x) == 0:
-        continue
+	coords_all.append(centers)
 
-    xs.append(x.mean())
-    ys.append(y.mean())
+first = coords_all[0]
+tracks = [[p] for p in first]
+prev = first
 
-plt.plot(xs, ys, "-o")
-plt.gca().invert_yaxis()
-plt.grid()
+for k in range(1, len(coords_all)):
+	cur = coords_all[k]
+	new_prev = [None] * len(prev)
+
+	for i, (px, py) in enumerate(prev):
+		best = None
+		best_d = float("inf")
+
+		for j, (cx, cy) in enumerate(cur):
+			d = np.hypot(cx - px, cy - py)
+			if d < best_d:
+				best_d = d
+				best = (cx, cy)
+
+		tracks[i].append(best)
+		new_prev[i] = best
+
+	prev = new_prev
+
+for t in tracks:
+	xs = [p[0] for p in t]
+	ys = [p[1] for p in t]
+	plt.plot(xs, ys)
 
 plt.savefig("trajectory.png", dpi=200)
 plt.show()
